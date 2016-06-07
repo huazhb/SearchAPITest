@@ -14,7 +14,12 @@
 -->
 <!-- [END_EXCLUDE] -->
 <appengine-web-app xmlns="http://appengine.google.com/ns/1.0">
-  <application>YOUR-PROJECT-ID</application>
-  <version>YOUR-VERSION-ID</version>
+  <application>pure-league-133023</application>
+  <version>201606040001</version>
   <threadsafe>true</threadsafe>
+  <use-google-connector-j>true</use-google-connector-j>
+  <system-properties>
+    <property name="mysql" value="jdbc:google:mysql://pure-league-133023:us-central1:hc-hotels/HC?user=appengine&amp;password=123456" />
+    <property name="mysqlLocal" value="jdbc:mysql://104.197.57.234/HC?user=appengine&amp;password=123456" />
+  </system-properties>
 </appengine-web-app>

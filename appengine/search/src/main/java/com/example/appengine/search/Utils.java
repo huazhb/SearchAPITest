@@ -1,12 +1,12 @@
 /**
  * Copyright 2016 Google Inc. All Rights Reserved.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@
 package com.example.appengine.search;
 
 // [START index_import]
+
 import com.google.appengine.api.search.Document;
 import com.google.appengine.api.search.Index;
 import com.google.appengine.api.search.IndexSpec;
@@ -36,7 +37,7 @@ public class Utils {
    */
   // [START putting_document_with_retry]
   public static void indexADocument(String indexName, Document document)
-      throws InterruptedException {
+          throws InterruptedException {
     IndexSpec indexSpec = IndexSpec.newBuilder().setName(indexName).build();
     Index index = SearchServiceFactory.getSearchService().getIndex(indexSpec);
 
@@ -48,7 +49,7 @@ public class Utils {
         index.put(document);
       } catch (PutException e) {
         if (StatusCode.TRANSIENT_ERROR.equals(e.getOperationResult().getCode())
-            && ++attempts < maxRetry) { // retrying
+                && ++attempts < maxRetry) { // retrying
           Thread.sleep(delay * 1000);
           delay *= 2; // easy exponential backoff
           continue;
@@ -58,6 +59,36 @@ public class Utils {
       }
       break;
     }
+  }
+
+  public static Index indexDocuments(Index existingIndex, String indexName, Iterable<Document> documents)
+          throws InterruptedException {
+    Index index = existingIndex;
+    if (index == null) {
+      IndexSpec indexSpec = IndexSpec.newBuilder().setName(indexName).build();
+      index = SearchServiceFactory.getSearchService().getIndex(indexSpec);
+    }
+
+
+    final int maxRetry = 3;
+    int attempts = 0;
+    int delay = 2;
+    while (true) {
+      try {
+        index.put(documents);
+      } catch (PutException e) {
+        if (StatusCode.TRANSIENT_ERROR.equals(e.getOperationResult().getCode())
+                && ++attempts < maxRetry) { // retrying
+          Thread.sleep(delay * 1000);
+          delay *= 2; // easy exponential backoff
+          continue;
+        } else {
+          throw e; // otherwise throw
+        }
+      }
+      break;
+    }
+    return index;
   }
   // [END putting_document_with_retry]
 }

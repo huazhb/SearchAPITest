@@ -19,6 +19,8 @@ package com.example.appengine.search;
 // [START document_import]
 import com.google.appengine.api.search.Document;
 import com.google.appengine.api.search.Field;
+import com.google.appengine.api.search.GeoPoint;
+import com.google.appengine.api.search.Index;
 import com.google.appengine.api.users.User;
 import com.google.appengine.api.users.UserServiceFactory;
 // [END document_import]
@@ -29,55 +31,98 @@ import java.util.Date;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.servlet.ServletException;
+import java.util.ArrayList;
+import java.util.List;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import com.example.appengine.business.Hotel;
 
 /**
  * A servlet for creating Search API Document.
  */
 @SuppressWarnings("serial")
 public class DocumentServlet extends HttpServlet {
-
-  /**
-   * Code snippet for creating a Document.
-   * @return Document Created document.
-   */
-  public Document createDocument() {
+  public Document createDocument(Hotel hotel) {
     // [START create_document]
-    User currentUser = UserServiceFactory.getUserService().getCurrentUser();
-    String userEmail = currentUser == null ? "" : currentUser.getEmail();
-    String userDomain = currentUser == null ? "" : currentUser.getAuthDomain();
-    String myDocId = "PA6-5000";
+    String myDocId = String.valueOf(hotel.hotelID);
     Document doc = Document.newBuilder()
-        // Setting the document identifer is optional.
-        // If omitted, the search service will create an identifier.
-        .setId(myDocId)
-        .addField(Field.newBuilder().setName("content").setText("the rain in spain"))
-        .addField(Field.newBuilder().setName("email").setText(userEmail))
-        .addField(Field.newBuilder().setName("domain").setAtom(userDomain))
-        .addField(Field.newBuilder().setName("published").setDate(new Date()))
-        .build();
+            .setId(myDocId).addField(Field.newBuilder().setName("HotelName").setText(hotel.hotelName))
+            .addField(Field.newBuilder().setName("Location").setGeoPoint(new GeoPoint(hotel.latitude.doubleValue(), hotel.longitude.doubleValue())))
+            .build();
     // [END create_document]
     return doc;
   }
 
   @Override
-  public void doGet(HttpServletRequest req, HttpServletResponse resp)
-      throws IOException {
-    PrintWriter out = resp.getWriter();
-    Document document = Document.newBuilder()
-        .addField(Field.newBuilder().setName("coverLetter").setText("CoverLetter"))
-        .addField(Field.newBuilder().setName("resume").setHTML("<html></html>"))
-        .addField(Field.newBuilder().setName("fullName").setAtom("Foo Bar"))
-        .addField(Field.newBuilder().setName("submissionDate").setDate(new Date()))
-        .build();
-    // [START access_document]
-    String coverLetter = document.getOnlyField("coverLetter").getText();
-    String resume = document.getOnlyField("resume").getHTML();
-    String fullName = document.getOnlyField("fullName").getAtom();
-    Date submissionDate = document.getOnlyField("submissionDate").getDate();
-    // [END access_document]
-    out.println("coverLetter: " + coverLetter);
-    out.println("resume: " + resume);
-    out.println("fullName: " + fullName);
-    out.println("submissionDate: " + submissionDate.toString());
+  public void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
+    String connString;
+    if (System.getProperty("com.google.appengine.runtime.version").startsWith("Google App Engine/")) {
+      connString = System.getProperty("mysql");
+      try {
+        // Load the class that provides the new "jdbc:google:mysql://"
+        // prefix.
+        Class.forName("com.mysql.jdbc.GoogleDriver");
+      } catch (ClassNotFoundException e) {
+        throw new ServletException("Error loading Google JDBC Driver", e);
+      }
+    } else {
+      // Set the url with the local MySQL database connection url when
+      // running locally
+      connString = System.getProperty("mysqlLocal");
+    }
+
+    ArrayList hotels = new ArrayList();
+    try (Connection conn = DriverManager.getConnection(connString)) {
+      String selectSql = "select HotelID, HotelName, Latitude, Longitude from Hotel where IsImported = 0 order by HotelID Limit 50000";
+      ResultSet rs = conn.prepareStatement(selectSql).executeQuery();
+      while (rs.next()) {
+        Hotel hotel = new Hotel();
+        hotel.hotelID = rs.getInt("HotelID");
+        hotel.hotelName = rs.getString("HotelName");
+        hotel.latitude = rs.getBigDecimal("Latitude");
+        hotel.longitude = rs.getBigDecimal("Longitude");
+        hotels.add(hotel);
+      }
+
+      int batchSize = 200;
+      String indexName = "HCHotels";
+      ArrayList docs = new ArrayList();
+      Index index = null;
+      for(int i = 0; i < hotels.size(); i++){
+        if(docs.size() == batchSize){
+          index = Utils.indexDocuments(index, indexName, docs);
+          docs.clear();
+        }
+        Document doc = createDocument((Hotel) hotels.get(i));
+        docs.add(doc);
+      }
+      if(docs.size() > 0){
+        Utils.indexDocuments(index, indexName, docs);
+        docs.clear();
+      }
+
+      String updateSql = "update Hotel set IsImported = 1 where HotelID between ? and ?";
+      PreparedStatement statement = conn.prepareStatement(updateSql);
+      statement.setInt(1, ((Hotel)hotels.get(0)).hotelID);
+      statement.setInt(2, ((Hotel)hotels.get(hotels.size() -1)).hotelID);
+      statement.execute();
+
+      req.setAttribute("hotels", hotels.size());
+      try{
+        req.getRequestDispatcher("/welcome.jsp").forward(req, resp);
+      }
+      catch(ServletException e){
+        throw new ServletException("error forward to welcome.jsp", e);
+      }
+    } catch (SQLException e) {
+      throw new ServletException("SQL error", e);
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
   }
+
 }
